@@ -1,7 +1,12 @@
 import sys
 from PyQt5.QtWidgets import *
+from PyQt5.QtGui import QKeySequence
 from PyQt5.QtCore import *
 from PyQt5.QtWebEngineWidgets import QWebEngineView
+import json
+import os
+
+BOOKMARKS_FILE = "bookmarks.json"
 
 
 class TabWebEngineView(QWebEngineView):
@@ -44,9 +49,25 @@ class MainWindow(QMainWindow):
         self.add_new_tab("https://google.com.br", "Home")
         self.show()
 
+        QShortcut(QKeySequence("Ctrl+T"), self, self.add_new_tab)  # Nova aba
+        QShortcut(QKeySequence("Ctrl+W"), self, lambda: self.close_current_tab(self.tabs.currentIndex()))  # Fechar aba
+        QShortcut(QKeySequence("Ctrl+Tab"), self, lambda: self.tabs.setCurrentIndex((self.tabs.currentIndex()+1)%self.tabs.count()))  # Próxima aba
+        QShortcut(QKeySequence("Ctrl+Shift+Tab"), self, lambda: self.tabs.setCurrentIndex((self.tabs.currentIndex()-1)%self.tabs.count()))  # Aba anterior
+
+        self.load_bookmarks()
+        bookmark_btn = QAction('⭐ Favoritar', self)
+        bookmark_btn.triggered.connect(self.add_bookmark)
+        self.navbar.addAction(bookmark_btn)
+
+        show_bookmarks_btn = QAction('📖 Favoritos', self)
+        show_bookmarks_btn.triggered.connect(self.show_bookmarks)
+        self.navbar.addAction(show_bookmarks_btn)
+
+
     # =====================
     # Funções de aba
     # =====================
+
     def add_new_tab(self, qurl=None, label="Nova Aba"):
         if qurl is None:
             qurl = "https://google.com.br"
@@ -89,6 +110,7 @@ class MainWindow(QMainWindow):
     # =====================
     # Navbar
     # =====================
+
     def botoes(self, navbar):
         back_btn = QAction('<', self)
         back_btn.triggered.connect(lambda: self.tabs.currentWidget().back())
@@ -114,25 +136,53 @@ class MainWindow(QMainWindow):
         history_btn.triggered.connect(self.show_history)
         navbar.addAction(history_btn)
 
+        theme_btn = QAction("Tema Escuro", self)
+        theme_btn.triggered.connect(self.toggle_theme)
+        self.navbar.addAction(theme_btn)
+        self.dark_mode = False
+
+
     def url_bar_widget(self, navbar):
         self.url_bar = QLineEdit()
         self.url_bar.returnPressed.connect(self.navigate_to_url)
         navbar.addWidget(self.url_bar)
 
     def navigate_to_url(self):
-        url = self.url_bar.text()
-        if not url.startswith(('http://', 'https://')):
-            url = 'https://' + url
+        text = self.url_bar.text()
+        if text.startswith("g "):
+            query = text[2:]
+            url = f"https://www.google.com/search?q={query}"
+        elif text.startswith("w "):
+            query = text[2:]
+            url = f"https://en.wikipedia.org/wiki/{query.replace(' ', '_')}"
+        elif text.startswith("d "):
+            query = text[2:]
+            url = f"https://duckduckgo.com/?q={query}"
+        else:
+            url = text
+            if not url.startswith(("http://", "https://")):
+                url = "https://" + url
         self.tabs.currentWidget().setUrl(QUrl(url))
+
 
     def update_url(self, q, browser=None):
         if browser != self.tabs.currentWidget():
             return
         self.url_bar.setText(q.toString())
 
+    def toggle_theme(self):
+        if not self.dark_mode:
+            self.setStyleSheet("QMainWindow {background-color: #2b2b2b;} QToolBar {background-color: #3c3c3c;} QTabWidget::pane {background-color: #2b2b2b;} QLineEdit {background-color: #3c3c3c; color: white;}")
+            self.dark_mode = True
+        else:
+            self.setStyleSheet("")
+            self.dark_mode = False
+
+
     # =====================
     # Histórico
     # =====================
+
     def show_history(self):
         dialog = QDialog(self)
         dialog.setWindowTitle("Histórico de Navegação")
@@ -156,6 +206,7 @@ class MainWindow(QMainWindow):
     # =====================
     # Downloads
     # =====================
+
     def on_download_requested(self, download):
         path, _ = QFileDialog.getSaveFileName(self, "Salvar arquivo", download.path())
         if path:
@@ -170,6 +221,47 @@ class MainWindow(QMainWindow):
             self.progress.setValue(received)
             if received >= total:
                 self.progress.setVisible(False)
+
+    # =====================
+    # Bookmarks
+    # =====================            
+
+    def load_bookmarks(self):
+        if os.path.exists(BOOKMARKS_FILE):
+            with open(BOOKMARKS_FILE, "r") as f:
+                self.bookmarks = json.load(f)
+        else:
+            self.bookmarks = []
+
+    def save_bookmarks(self):
+        with open(BOOKMARKS_FILE, "w") as f:
+            json.dump(self.bookmarks, f)
+
+    def add_bookmark(self):
+        url = self.tabs.currentWidget().url().toString()
+        title = self.tabs.currentWidget().page().title()
+        if (title, url) not in self.bookmarks:
+            self.bookmarks.append((title, url))
+            self.save_bookmarks()
+            QMessageBox.information(self, "Favorito", f"{title} adicionado aos favoritos!")
+
+    def show_bookmarks(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Favoritos")
+        layout = QVBoxLayout()
+        list_widget = QListWidget()
+        for title, url in reversed(self.bookmarks):
+            list_widget.addItem(f"{title} - {url}")
+        list_widget.itemDoubleClicked.connect(lambda item: self.open_bookmark(item))
+        layout.addWidget(list_widget)
+        dialog.setLayout(layout)
+        dialog.resize(600, 400)
+        dialog.exec_()
+
+    def open_bookmark(self, item):
+        url = item.text().split(" - ")[-1]
+        self.add_new_tab(url, "Nova Aba")
+
 
 
 if __name__ == "__main__":
